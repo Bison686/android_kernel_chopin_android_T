@@ -86,19 +86,32 @@ jobs:
       - name: Fix legacy C prototypes
         run: |
           cd kernel
-          # 修复老式空参数声明（4.14 内核 + 新 clang 的 -Werror=strict-prototypes 冲突）
-          sed -i 's/hw_item_dump()/hw_item_dump(void)/' arch/arm64/kernel/hwconf_manager.c
-          echo "--- fix applied ---"
-          sed -n '213p' arch/arm64/kernel/hwconf_manager.c
+          # 先还原误伤的调用处，再只修声明行（213 行）
+          sed -i 's/hw_item_dump(void)/hw_item_dump()/g' arch/arm64/kernel/hwconf_manager.c
+          sed -i '213s/hw_item_dump()/hw_item_dump(void)/' arch/arm64/kernel/hwconf_manager.c
+          echo "--- fixed line 213 ---"
+          sed -n '213p;280p' arch/arm64/kernel/hwconf_manager.c
+
+      - name: Remove -Werror for old kernel + new clang compat
+        run: |
+          cd kernel
+          # 4.14 内核代码有大量老式写法，新 clang 会 -Werror 报错；去掉所有 -Werror 让警告不阻断编译
+          grep -rl --include="Makefile" -- "-Werror" . | xargs sed -i 's/-Werror[^[:space:]]*//g' || true
+          echo "--- Werror occurrences left ---"
+          grep -rn --include="Makefile" -- "-Werror" . | head -5 || echo "none"
 
       - name: Build kernel
         run: |
+          set -o pipefail
           cd kernel
           export PATH="$GITHUB_WORKSPACE/clang/clang-r416183b/bin:$PATH"
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
           echo "=== config check ==="
           grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_KALLSYMS|CONFIG_SUSFS" out/.config || true
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j$(nproc) 2>&1 | tee build.log | tail -100
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING - BUILD FAILED"; exit 1; }
           echo "=== boot output ==="
           ls -la out/arch/arm64/boot/ || true
           find out -name "Image*" -o -name "*.dtb" 2>/dev/null | head -20 || true
