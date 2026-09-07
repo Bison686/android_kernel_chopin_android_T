@@ -83,6 +83,14 @@ jobs:
           echo "--- defconfig tail ---"
           tail -5 arch/arm64/configs/chopin_user_defconfig
 
+      - name: Fix legacy C prototypes
+        run: |
+          cd kernel
+          # 修复老式空参数声明（4.14 内核 + 新 clang 的 -Werror=strict-prototypes 冲突）
+          sed -i 's/hw_item_dump()/hw_item_dump(void)/' arch/arm64/kernel/hwconf_manager.c
+          echo "--- fix applied ---"
+          sed -n '213p' arch/arm64/kernel/hwconf_manager.c
+
       - name: Build kernel
         run: |
           cd kernel
@@ -90,7 +98,7 @@ jobs:
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
           echo "=== config check ==="
           grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_KALLSYMS|CONFIG_SUSFS" out/.config || true
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error" -j$(nproc) 2>&1 | tee build.log | tail -100
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j$(nproc) 2>&1 | tee build.log | tail -100
           echo "=== boot output ==="
           ls -la out/arch/arm64/boot/ || true
           find out -name "Image*" -o -name "*.dtb" 2>/dev/null | head -20 || true
