@@ -1,0 +1,15 @@
+name: Build chopin v1
+on: [workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: ChopinKernels/android_kernel_chopin_android_T
+          ref: T
+          path: kernel
+          fetch-depth: 1
+      - run: echo "v1 ok"
