@@ -147,7 +147,10 @@ jobs:
           # 4.14 link compat: selinux_inode() is static in 4.14 hooks.c -> access i_security directly
           sed -i 's/selinux_inode(inode)/((struct inode_security_struct *)inode->i_security)/' KernelSU/kernel/sucompat.c
           # 4.14 link compat: strncpy_from_user_nofault is 5.x-only; arm64 fixup tables make strncpy_from_user safe
+          # ORDER MATTERS: first unify the wrapper name (definition + all callers), then replace the kernel symbol
+          sed -i 's/ksu_strncpy_from_user_nofault/ksu_strncpy_from_user/g' KernelSU/kernel/kernel_compat.c KernelSU/kernel/sucompat.c KernelSU/kernel/ksud.c
           sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' KernelSU/kernel/kernel_compat.c
+          grep -n "ksu_strncpy_from_user\|strncpy_from_user_nofault" KernelSU/kernel/kernel_compat.c KernelSU/kernel/sucompat.c KernelSU/kernel/ksud.c | head -20
           grep -n "selinux_inode\|strncpy_from_user_nofault" KernelSU/kernel/sucompat.c KernelSU/kernel/kernel_compat.c || echo "OK: selinux_inode and strncpy_from_user_nofault replaced"
           grep -rn "ksu_handle_sepolicy\|ksu_apply_kernelsu_rules" KernelSU/kernel --include=*.c | grep -v "//" || true
           echo "=== top-level kernelsu-objs ==="
