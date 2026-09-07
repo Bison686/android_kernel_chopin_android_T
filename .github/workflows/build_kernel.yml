@@ -1,7 +1,6 @@
 name: Build chopin KernelSU+SUSFS
 
-"on":
-  workflow_dispatch:
+on: [workflow_dispatch]
 
 jobs:
   build:
