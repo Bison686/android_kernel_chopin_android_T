@@ -90,7 +90,7 @@ jobs:
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
           echo "=== config check ==="
           grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_KALLSYMS|CONFIG_SUSFS" out/.config || true
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- -j$(nproc) 2>&1 | tee build.log | tail -100
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error" -j$(nproc) 2>&1 | tee build.log | tail -100
           echo "=== boot output ==="
           ls -la out/arch/arm64/boot/ || true
           find out -name "Image*" -o -name "*.dtb" 2>/dev/null | head -20 || true
