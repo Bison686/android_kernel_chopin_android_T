@@ -92,13 +92,22 @@ jobs:
           echo "--- fixed line 213 ---"
           sed -n '213p;280p' arch/arm64/kernel/hwconf_manager.c
 
-      - name: Remove -Werror for old kernel + new clang compat
+      - name: Remove -Werror flags (precise, keep $(call) syntax)
         run: |
           cd kernel
-          # 4.14 内核代码有大量老式写法，新 clang 会 -Werror 报错；去掉所有 -Werror 让警告不阻断编译
-          grep -rl --include="Makefile" -- "-Werror" . | xargs sed -i 's/-Werror[^[:space:]]*//g' || true
-          echo "--- Werror occurrences left ---"
-          grep -rn --include="Makefile" -- "-Werror" . | head -5 || echo "none"
+          # 4.14 老内核 + 新 clang：只精准删除 -Werror 标志本身，保留 $(call cc-option, ...) 括号结构
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            Makefile
+          echo "--- verify line 987-999 ---"
+          sed -n '987p;990p;993p;996p;999p' Makefile
+          echo "=== remaining -Werror in all Makefiles ==="
+          grep -rn --include="Makefile" "\-Werror" . | head -20 || echo "none"
 
       - name: Build kernel
         run: |
