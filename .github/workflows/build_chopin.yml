@@ -49,18 +49,20 @@ jobs:
           cp susfs/kernel_patches/fs/* fs/
           cp susfs/kernel_patches/include/linux/* include/linux/
           cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
-          patch -p1 < 50_add_susfs_in_kernel-4.14.patch || echo "WARN: 50 patch failed, continue anyway"
-          echo "--- verify files ---"
-          ls -la include/linux/susfs.h fs/susfs.c 2>/dev/null || true
-          grep -c "KSU_SUSFS" KernelSU/kernel/Kconfig 2>/dev/null || true
+          patch -p1 < 50_add_susfs_in_kernel-4.14.patch
+          echo "--- verify files (fail fast if SUSFS not applied) ---"
+          test -f fs/susfs.c || { echo "ERROR: fs/susfs.c missing - patch failed"; exit 1; }
+          test -f include/linux/susfs.h || { echo "ERROR: include/linux/susfs.h missing - patch failed"; exit 1; }
+          grep -q "KSU_SUSFS" KernelSU/kernel/Kconfig || { echo "ERROR: KSU_SUSFS not in Kconfig - patch failed"; exit 1; }
+          echo "SUSFS patch applied OK"
 
       - name: Enable KSU and SUSFS configs
         run: |
           cd kernel
-          # 关掉 STRONG 栈保护（4.14 内核编译器检测与 clang 不兼容会中断），用普通版替代
-          sed -i '/CONFIG_CC_STACKPROTECTOR_STRONG/d' arch/arm64/configs/chopin_user_defconfig
+          # 全关栈保护：4.14 内核的编译器能力检测与 clang 不兼容（arm64 只有 STRONG 版，没有普通版可回退）
+          sed -i '/CONFIG_CC_STACKPROTECTOR/d' arch/arm64/configs/chopin_user_defconfig
+          echo "# CONFIG_CC_STACKPROTECTOR is not set" >> arch/arm64/configs/chopin_user_defconfig
           echo "# CONFIG_CC_STACKPROTECTOR_STRONG is not set" >> arch/arm64/configs/chopin_user_defconfig
-          echo "CONFIG_CC_STACKPROTECTOR=y" >> arch/arm64/configs/chopin_user_defconfig
           for cfg in \
             CONFIG_KPROBES=y \
             CONFIG_KALLSYMS=y \
@@ -107,6 +109,7 @@ jobs:
             -e 's/-Werror=incompatible-pointer-types//g' \
             -e 's/-Werror=designated-init//g' \
             -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
             Makefile
           echo "--- verify line 987-999 ---"
           sed -n '987p;990p;993p;996p;999p' Makefile
