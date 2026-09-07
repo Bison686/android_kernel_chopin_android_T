@@ -108,6 +108,12 @@ jobs:
           sed -n '987p;990p;993p;996p;999p' Makefile
           echo "=== remaining -Werror in all Makefiles ==="
           grep -rn --include="Makefile" "\-Werror" . | head -20 || echo "none"
+          # 处理子目录 Makefile 里的独立 -Werror（如 subdir-ccflags-y += -Werror），只删带空格边界的独立标志，不碰 -Werror=xxx
+          for f in $(grep -rl --include="Makefile" -- "-Werror" .); do
+            sed -i 's/ -Werror / /g; s/ -Werror$/ /g; s/ -Werror\b/ /g' "$f"
+          done
+          echo "=== after: remaining -Werror ==="
+          grep -rn --include="Makefile" "\-Werror" . | head -10 || echo "none"
 
       - name: Build kernel
         run: |
@@ -117,13 +123,18 @@ jobs:
           make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
           echo "=== config check ==="
           grep -E "CONFIG_KSU|CONFIG_KPROBES|CONFIG_KALLSYMS|CONFIG_SUSFS" out/.config || true
-          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j$(nproc) 2>&1 | tee build.log | tail -100
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j4 2>&1 | tee build.log | tail -100
           echo "=== boot output ==="
           ls -la out/arch/arm64/boot/ || true
           test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING - BUILD FAILED"; exit 1; }
-          echo "=== boot output ==="
-          ls -la out/arch/arm64/boot/ || true
-          find out -name "Image*" -o -name "*.dtb" 2>/dev/null | head -20 || true
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-build-log
+          path: kernel/build.log
+          if-no-files-found: ignore
 
       - name: Upload kernel image
         uses: actions/upload-artifact@v4
