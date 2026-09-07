@@ -144,6 +144,11 @@ jobs:
           sed -i '/obj-y += sepolicy.o/d; /obj-y += rules.o/d' KernelSU/kernel/selinux/Makefile
           sed -i '/ksu_apply_kernelsu_rules();/d' KernelSU/kernel/ksud.c
           sed -i '/extern int ksu_handle_sepolicy/d; s/if (!ksu_handle_sepolicy(arg3, arg4)) {/if (0) {/' KernelSU/kernel/core_hook.c
+          # 4.14 link compat: selinux_inode() is static in 4.14 hooks.c -> access i_security directly
+          sed -i 's/selinux_inode(inode)/((struct inode_security_struct *)inode->i_security)/' KernelSU/kernel/sucompat.c
+          # 4.14 link compat: strncpy_from_user_nofault is 5.x-only; arm64 fixup tables make strncpy_from_user safe
+          sed -i 's/strncpy_from_user_nofault/strncpy_from_user/g' KernelSU/kernel/kernel_compat.c
+          grep -n "selinux_inode\|strncpy_from_user_nofault" KernelSU/kernel/sucompat.c KernelSU/kernel/kernel_compat.c || echo "OK: selinux_inode and strncpy_from_user_nofault replaced"
           grep -rn "ksu_handle_sepolicy\|ksu_apply_kernelsu_rules" KernelSU/kernel --include=*.c | grep -v "//" || true
           echo "=== top-level kernelsu-objs ==="
           grep -n "selinux" KernelSU/kernel/Makefile
