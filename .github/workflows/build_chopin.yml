@@ -67,6 +67,19 @@ jobs:
           grep -q "HIDE_KSU_SUSFS_SYMBOLS" kernel/kallsyms.c || { echo "ERROR: kernel/kallsyms.c not adapted"; exit 1; }
           echo "SUSFS adapted files OK"
 
+      - name: 4.14 compat - strip KernelSU selinux sepolicy module
+        run: |
+          cd kernel
+          # KernelSU v1.0.5 selinux/sepolicy.c targets 5.9+ policydb structures
+          # (filename_trans_key/type_val_to_struct/policy member) - not present on chopin 4.14.
+          # Boot is permissive, so in-kernel sepolicy patching is not required.
+          # Drop sepolicy.o and rules.o; stub the two entry points referenced by ksud.c/core_hook.c.
+          sed -i '/obj-y += sepolicy.o/d; /obj-y += rules.o/d' KernelSU/kernel/selinux/Makefile
+          sed -i '/ksu_apply_kernelsu_rules();/d' KernelSU/kernel/ksud.c
+          sed -i '/extern int ksu_handle_sepolicy/d; s/if (!ksu_handle_sepolicy(arg3, arg4)) {/if (0) {/' KernelSU/kernel/core_hook.c
+          grep -rn "ksu_handle_sepolicy\|ksu_apply_kernelsu_rules" KernelSU/kernel --include=*.c | grep -v "//" || true
+          grep -n "obj-y" KernelSU/kernel/selinux/Makefile
+
       - name: Enable KSU and SUSFS configs
         run: |
           cd kernel
