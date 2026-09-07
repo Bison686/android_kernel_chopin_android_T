@@ -31,26 +31,32 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
-      - name: Integrate KernelSU v1.0.2
+      - name: Integrate KernelSU v1.0.5 (matches susfs4ksu kernel-4.14 branch)
         run: |
           cd kernel
-          git clone --depth 1 -b v1.0.2 https://github.com/tiann/KernelSU.git KernelSU
+          # susfs4ksu kernel-4.14 分支官方同步 KernelSU tag v1.0.5（README: "Bump version to v1.5.8; Still sync with KernelSU tag v1.0.5"）
+          git clone --depth 1 -b v1.0.5 https://github.com/tiann/KernelSU.git KernelSU
           ln -sf "$(pwd)/KernelSU/kernel" drivers/kernelsu
           grep -q "kernelsu" drivers/Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
           grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig
-          echo "--- KernelSU integrated ---"
+          echo "--- KernelSU v1.0.5 integrated ---"
 
       - name: Apply SUSFS patches
         run: |
           cd kernel
+          KROOT="$PWD"
           git clone --depth 1 -b kernel-4.14 https://github.com/ShirkNeko/susfs4ksu.git susfs
           cp susfs/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch KernelSU/
-          cp susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch .
+          cp susfs/kernel_patches/50_add_susfs_in_kernel-4.14.patch "$KROOT"/
           cp susfs/kernel_patches/fs/* fs/
           cp susfs/kernel_patches/include/linux/* include/linux/
-          cd KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch && cd ..
+          cd KernelSU
+          patch -p1 < 10_enable_susfs_for_ksu.patch
+          cd "$KROOT"
           patch -p1 < 50_add_susfs_in_kernel-4.14.patch
-          echo "--- verify files (fail fast if SUSFS not applied) ---"
+          echo "--- verify (fail fast) ---"
+          test ! -f KernelSU/kernel/core_hook.c.rej || { echo "ERROR: core_hook.c.rej exists - KernelSU version mismatch"; exit 1; }
+          ls KernelSU/kernel/*.rej 2>/dev/null || echo "no rejects (good)"
           test -f fs/susfs.c || { echo "ERROR: fs/susfs.c missing - patch failed"; exit 1; }
           test -f include/linux/susfs.h || { echo "ERROR: include/linux/susfs.h missing - patch failed"; exit 1; }
           grep -q "KSU_SUSFS" KernelSU/kernel/Kconfig || { echo "ERROR: KSU_SUSFS not in Kconfig - patch failed"; exit 1; }
@@ -115,9 +121,9 @@ jobs:
           sed -n '987p;990p;993p;996p;999p' Makefile
           echo "=== remaining -Werror in all Makefiles ==="
           grep -rn --include="Makefile" "\-Werror" . | head -20 || echo "none"
-          # 处理子目录 Makefile 里的独立 -Werror（如 subdir-ccflags-y += -Werror），只删带空格边界的独立标志，不碰 -Werror=xxx
+          # 处理子目录 Makefile 里的独立 -Werror（如 subdir-ccflags-y += -Werror），只删带空格/行尾边界的独立标志，绝不碰 -Werror=xxx
           for f in $(grep -rl --include="Makefile" -- "-Werror" .); do
-            sed -i 's/ -Werror / /g; s/ -Werror$/ /g; s/ -Werror\b/ /g' "$f"
+            sed -i 's/ -Werror / /g; s/ -Werror$/ /g' "$f"
           done
           echo "=== after: remaining -Werror ==="
           grep -rn --include="Makefile" "\-Werror" . | head -10 || echo "none"
