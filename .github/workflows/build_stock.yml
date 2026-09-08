@@ -1,0 +1,51 @@
+name: Build Stock Kernel (no KSU/SUSFS)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: ChopinKernels/android_kernel_chopin_android_T
+          ref: T
+          path: kernel
+
+      - name: Setup clang
+        run: |
+          mkdir -p clang
+          cd clang
+          curl -sL "https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b/archive/refs/heads/lineage-20.tar.gz" -o clang.tar.gz
+          tar xzf clang.tar.gz
+          mv android_prebuilts_clang_host_linux-x86_clang-r416183b-lineage-20 clang-r416183b
+          ls clang-r416183b/bin/clang
+
+      - name: Build stock kernel
+        run: |
+          set -o pipefail
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang/clang-r416183b/bin:$PATH"
+          echo "=== defconfig ==="
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
+          echo "=== full .config (MTK checks) ==="
+          grep -E "CONFIG_ARCH_MEDIATEK|CONFIG_MACH_MT|CONFIG_ARM64|CONFIG_CPU_V8|CONFIG_OF|CONFIG_SMP" out/.config | head -30
+          echo "=== .config size ==="
+          wc -l out/.config
+          cp out/.config out/dot_config_stock.txt
+          echo "=== build ==="
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j4 2>&1 | tee build.log | tail -50
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-stock-kernel
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/dot_config_stock.txt
+            kernel/build.log
