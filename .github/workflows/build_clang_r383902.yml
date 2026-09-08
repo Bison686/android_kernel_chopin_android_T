@@ -1,0 +1,66 @@
+name: Build Stock Kernel with Clang r383902 (same as stock)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kernel source (T branch)
+        uses: actions/checkout@v4
+        with:
+          ref: T
+          path: kernel
+
+      - name: Setup clang r383902 (same as stock kernel)
+        run: |
+          wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r383902.tar.gz" -O clang-r383902.tar.gz
+          mkdir -p clang-r383902
+          tar xzf clang-r383902.tar.gz -C clang-r383902
+          ls clang-r383902/bin/clang
+          clang-r383902/bin/clang --version
+
+      - name: Install aarch64 binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Remove -Werror flags
+        run: |
+          cd kernel
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          find . -name "Makefile" -exec sed -i 's/ -Werror / /g; s/ -Werror$/ /g' {} \;
+
+      - name: Build stock kernel with clang r383902
+        run: |
+          set -o pipefail
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang-r383902/bin:$PATH"
+          echo "=== clang version ==="
+          clang --version
+          echo "=== defconfig ==="
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -5
+          echo "=== build ==="
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j4 2>&1 | tee build.log | tail -50
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-stock-clang-r383902
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/.config
+            kernel/build.log
