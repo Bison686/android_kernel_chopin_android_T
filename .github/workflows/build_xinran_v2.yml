@@ -40,6 +40,13 @@ jobs:
             Makefile
           find . -name "Makefile" -exec sed -i 's/ -Werror / /g; s/ -Werror$/ /g' {} \;
 
+      - name: Create missing firmware files
+        run: |
+          cd kernel
+          mkdir -p include/firmware
+          touch include/firmware/fw_sample.i
+          ls -la include/firmware/
+
       - name: Build kernel
         run: |
           cd kernel
