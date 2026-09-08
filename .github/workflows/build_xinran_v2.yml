@@ -47,6 +47,13 @@ jobs:
           touch include/firmware/fw_sample.i
           ls -la include/firmware/
 
+      - name: Disable unused focaltech SPI driver
+        run: |
+          cd kernel
+          # 红米Note10Pro用汇顶GT9886/GT9896S，focaltech_spi不是主驱动，禁用它避免fw_sample.i缺失
+          sed -i 's/^CONFIG_TOUCHSCREEN_FOCALTECH=y/# CONFIG_TOUCHSCREEN_FOCALTECH is not set/' arch/arm64/configs/chopin_xinran_defconfig
+          grep -i focaltech arch/arm64/configs/chopin_xinran_defconfig || echo "focaltech已禁用"
+
       - name: Build kernel
         run: |
           cd kernel
