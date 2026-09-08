@@ -1,0 +1,91 @@
+name: Build Kernel with xinran source (correct MTK build)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout xinran kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: lanmiemie/android_kernel_xiaomi_chopin_xinran
+          ref: chopin_xinran
+          path: kernel
+
+      - name: Setup clang r383902
+        run: |
+          wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r383902.tar.gz" -O clang-r383902.tar.gz
+          mkdir -p clang-r383902
+          tar xzf clang-r383902.tar.gz -C clang-r383902
+          clang-r383902/bin/clang --version
+
+      - name: Setup aarch64-linux-android-4.9 GCC
+        run: |
+          wget -q "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz" -O aarch64-gcc.tar.gz
+          mkdir -p aarch64-gcc
+          tar xzf aarch64-gcc.tar.gz -C aarch64-gcc
+          ls aarch64-gcc/bin/aarch64-linux-android-*
+
+      - name: Setup arm-linux-gnueabi-4.9 GCC
+        run: |
+          wget -q "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9/+archive/refs/tags/android-12.1.0_r27.tar.gz" -O arm-gcc.tar.gz
+          mkdir -p arm-gcc
+          tar xzf arm-gcc.tar.gz -C arm-gcc
+          ls arm-gcc/bin/arm-linux-*
+
+      - name: Remove -Werror flags
+        run: |
+          cd kernel
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          find . -name "Makefile" -exec sed -i 's/ -Werror / /g; s/ -Werror$/ /g' {} \;
+
+      - name: Build kernel with correct MTK config
+        run: |
+          set -o pipefail
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang-r383902/bin:$GITHUB_WORKSPACE/aarch64-gcc/bin:$GITHUB_WORKSPACE/arm-gcc/bin:$PATH"
+          echo "=== clang version ==="
+          clang --version
+          echo "=== defconfig ==="
+          make O=out ARCH=arm64 SUBARCH=ARM64 LLVM=1 LLVM_IAS=0 \
+            CC=clang HOSTCC=clang HOSTCXX=clang++ \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            AR=llvm-ar HOSTAR=llvm-ar AS=llvm-as NM=llvm-nm \
+            LD=ld.lld HOSTLD=ld.lld STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size READELF=llvm-readelf \
+            chopin_xinran_defconfig 2>&1 | tail -10
+          echo "=== build ==="
+          make -j4 O=out ARCH=arm64 SUBARCH=ARM64 LLVM=1 LLVM_IAS=0 \
+            CC=clang HOSTCC=clang HOSTCXX=clang++ \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-android- \
+            CROSS_COMPILE_ARM32=arm-linux-androideabi- \
+            AR=llvm-ar HOSTAR=llvm-ar AS=llvm-as NM=llvm-nm \
+            LD=ld.lld HOSTLD=ld.lld STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size READELF=llvm-readelf \
+            KCFLAGS="-Wno-error -Wno-error=strict-prototypes" 2>&1 | tee build.log | tail -80
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-xinran-correct-build
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/.config
+            kernel/build.log
