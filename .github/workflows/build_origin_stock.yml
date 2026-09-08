@@ -1,0 +1,63 @@
+name: Build Stock Kernel with Origin Defconfig
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout kernel source (v22 branch with origin defconfig)
+        uses: actions/checkout@v4
+        with:
+          ref: v22
+          path: kernel
+
+      - name: Setup clang
+        run: |
+          git clone --depth 1 -b lineage-20.0 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git clang
+          ls clang/bin/clang
+
+      - name: Install aarch64 binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Remove -Werror flags
+        run: |
+          cd kernel
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          find . -name "Makefile" -exec sed -i 's/ -Werror / /g; s/ -Werror$/ /g' {} \;
+
+      - name: Build stock kernel with origin defconfig
+        run: |
+          set -o pipefail
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang/clang-r416183b/bin:$PATH"
+          echo "=== Using origin defconfig ==="
+          mkdir -p out
+          cp arch/arm64/configs/chopin_origin_defconfig out/.config
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- olddefconfig 2>&1 | tail -10
+          echo "=== build ==="
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j4 2>&1 | tee build.log | tail -50
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING"; exit 1; }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-stock-origin-defconfig
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/.config
+            kernel/build.log
