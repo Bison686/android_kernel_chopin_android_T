@@ -1,6 +1,7 @@
 name: Build chopin v22 KernelSU-Next + SUSFS v2.2.0
 
-on: [workflow_dispatch]
+on:
+  workflow_dispatch:
 
 jobs:
   build:
