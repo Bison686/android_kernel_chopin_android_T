@@ -1,0 +1,83 @@
+name: Build Kernel with xinran source (v2 correct params)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout xinran kernel source
+        uses: actions/checkout@v4
+        with:
+          repository: lanmiemie/android_kernel_xiaomi_chopin_xinran
+          ref: chopin_xinran
+          path: kernel
+
+      - name: Setup clang r383902
+        run: |
+          wget -q "https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/master-kernel-build-2021/clang-r383902.tar.gz" -O clang-r383902.tar.gz
+          mkdir -p clang-r383902
+          tar xzf clang-r383902.tar.gz -C clang-r383902
+          clang-r383902/bin/clang --version
+
+      - name: Install aarch64-linux-gnu and arm-linux-gnueabi
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi
+
+      - name: Remove -Werror flags
+        run: |
+          cd kernel
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          find . -name "Makefile" -exec sed -i 's/ -Werror / /g; s/ -Werror$/ /g' {} \;
+
+      - name: Build kernel
+        run: |
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang-r383902/bin:$PATH"
+          echo "=== defconfig ==="
+          make O=out ARCH=arm64 SUBARCH=ARM64 LLVM=1 LLVM_IAS=0 \
+            CC=clang HOSTCC=clang HOSTCXX=clang++ \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            AR=llvm-ar HOSTAR=llvm-ar AS=llvm-as NM=llvm-nm \
+            LD=ld.lld HOSTLD=ld.lld STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size READELF=llvm-readelf \
+            chopin_xinran_defconfig 2>&1 | tail -10
+          echo "=== build ==="
+          make -j4 O=out ARCH=arm64 SUBARCH=ARM64 LLVM=1 LLVM_IAS=0 \
+            CC=clang HOSTCC=clang HOSTCXX=clang++ \
+            CLANG_TRIPLE=aarch64-linux-gnu- \
+            CROSS_COMPILE=aarch64-linux-gnu- \
+            CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+            AR=llvm-ar HOSTAR=llvm-ar AS=llvm-as NM=llvm-nm \
+            LD=ld.lld HOSTLD=ld.lld STRIP=llvm-strip \
+            OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump OBJSIZE=llvm-size READELF=llvm-readelf \
+            CONFIG_NO_ERROR_ON_MISMATCH=y \
+            KCFLAGS="-Wno-error -Wno-error=strict-prototypes" 2>&1 | tee build.log
+          echo "=== build exit: $? ==="
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image && echo "Image EXISTS" || echo "Image MISSING"
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || echo "Image.gz-dtb MISSING"
+
+      - name: Upload artifact (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-xinran-v2
+          path: |
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/.config
+            kernel/build.log
