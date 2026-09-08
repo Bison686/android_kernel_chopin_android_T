@@ -1,0 +1,152 @@
+name: Build chopin SukiSU-Ultra builtin + SUSFS
+
+on: [workflow_dispatch]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/hostedtoolcache
+          df -h
+
+      - name: Checkout upstream kernel (clean T branch)
+        uses: actions/checkout@v4
+        with:
+          repository: ChopinKernels/android_kernel_chopin_android_T
+          ref: T
+          path: kernel
+          fetch-depth: 1
+
+      - name: Apply SUSFS adapted files from susfs-adapt branch
+        run: |
+          cd kernel
+          # 从 Bison686 fork 的 susfs-adapt 分支提取 21 个已适配文件（基于同一上游 T 源码）
+          git remote add adapt https://github.com/Bison686/android_kernel_chopin_android_T.git
+          git fetch --depth 1 adapt susfs-adapt
+          git checkout adapt/susfs-adapt -- \
+            fs/dcache.c fs/Makefile fs/namei.c fs/namespace.c fs/proc_namespace.c \
+            fs/readdir.c fs/stat.c fs/statfs.c fs/susfs.c fs/sus_su.c \
+            fs/notify/fdinfo.c fs/proc/cmdline.c fs/proc/fd.c fs/proc/task_mmu.c \
+            include/linux/mount.h include/linux/stat.h \
+            include/linux/susfs.h include/linux/susfs_def.h include/linux/sus_su.h \
+            kernel/kallsyms.c kernel/sys.c
+          echo "--- verify SUSFS adapted files (fail fast) ---"
+          test -f fs/susfs.c || { echo "ERROR: fs/susfs.c missing"; exit 1; }
+          test -f include/linux/susfs.h || { echo "ERROR: susfs.h missing"; exit 1; }
+          grep -q "susfs_mnt_id_ida" fs/namespace.c || { echo "ERROR: namespace.c not adapted"; exit 1; }
+          grep -q "obj-\$(CONFIG_KSU_SUSFS) += susfs.o" fs/Makefile || { echo "ERROR: fs/Makefile not adapted"; exit 1; }
+          grep -q "HIDE_KSU_SUSFS_SYMBOLS" kernel/kallsyms.c || { echo "ERROR: kallsyms.c not adapted"; exit 1; }
+          echo "SUSFS adapted files OK"
+
+      - name: Clone clang toolchain
+        run: |
+          git clone --depth 1 -b lineage-20.0 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git clang
+          ls clang/
+
+      - name: Install aarch64 binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Integrate SukiSU-Ultra builtin branch
+        run: |
+          cd kernel
+          # builtin 分支 = 非 GKI 专用（LSM hook，无需 kprobe），官方支持 4.14
+          git clone --depth 1 -b builtin https://github.com/SukiSU-Ultra/SukiSU-Ultra.git KernelSU
+          ln -sf "$(pwd)/KernelSU/kernel" drivers/kernelsu
+          grep -q "kernelsu" drivers/Makefile || echo "obj-\$(CONFIG_KSU) += kernelsu/" >> drivers/Makefile
+          grep -q "drivers/kernelsu/Kconfig" drivers/Kconfig || sed -i "/endmenu/i\source \"drivers/kernelsu/Kconfig\"" drivers/Kconfig
+          echo "--- SukiSU-Ultra builtin integrated ---"
+          ls -la drivers/kernelsu/
+
+      - name: Enable KSU and SUSFS configs
+        run: |
+          cd kernel
+          # SukiSU builtin 用 LSM hook，不需要 KPROBES
+          for cfg in \
+            CONFIG_KSU=y \
+            CONFIG_KSU_SUSFS=y \
+            CONFIG_KSU_SUSFS_SUS_PATH=y \
+            CONFIG_KSU_SUSFS_SUS_MOUNT=y \
+            CONFIG_KSU_SUSFS_SUS_KSTAT=y \
+            CONFIG_KSU_SUSFS_SPOOF_UNAME=y \
+            CONFIG_KSU_SUSFS_ENABLE_LOG=y \
+            CONFIG_KSU_SUSFS_HIDE_KSU_SUSFS_SYMBOLS=y \
+            CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG=y \
+            CONFIG_KSU_SUSFS_OPEN_REDIRECT=y \
+            CONFIG_KSU_SUSFS_SUS_MAP=y \
+            CONFIG_KALLSYMS=y \
+            CONFIG_KALLSYMS_ALL=y
+          do
+            echo "$cfg" >> arch/arm64/configs/chopin_user_defconfig
+          done
+          echo "--- defconfig tail ---"
+          tail -16 arch/arm64/configs/chopin_user_defconfig
+
+      - name: Fix legacy C prototypes
+        run: |
+          cd kernel
+          # 先还原误伤的调用处，再只修声明行（213 行）
+          sed -i 's/hw_item_dump(void)/hw_item_dump()/g' arch/arm64/kernel/hwconf_manager.c
+          sed -i '213s/hw_item_dump()/hw_item_dump(void)/' arch/arm64/kernel/hwconf_manager.c
+          echo "--- fixed line 213 ---"
+          sed -n '213p;280p' arch/arm64/kernel/hwconf_manager.c
+
+      - name: Remove -Werror flags (precise, keep $(call) syntax)
+        run: |
+          cd kernel
+          # 4.14 老内核 + 新 clang：只精准删除 -Werror 标志本身，保留 $(call cc-option, ...) 括号结构
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          echo "--- verify Makefile ---"
+          grep -c "\-Werror" Makefile || echo "0 Werror left in top Makefile"
+          # 处理子目录 Makefile 里的独立 -Werror（如 subdir-ccflags-y += -Werror），只删带空格/行尾边界的独立标志，绝不碰 -Werror=xxx
+          for f in $(grep -rl --include="Makefile" -- "-Werror" .); do
+            sed -i 's/ -Werror / /g; s/ -Werror$/ /g' "$f"
+          done
+          echo "=== remaining -Werror in all Makefiles ==="
+          grep -rn --include="Makefile" "\-Werror" . | head -10 || echo "none"
+
+      - name: Build kernel
+        run: |
+          set -o pipefail
+          cd kernel
+          export PATH="$GITHUB_WORKSPACE/clang/clang-r416183b/bin:$PATH"
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- chopin_user_defconfig 2>&1 | tail -20
+          echo "=== config check ==="
+          grep -E "CONFIG_KSU|CONFIG_KALLSYMS|CONFIG_SUSFS|CONFIG_THREAD_INFO_IN_TASK|CONFIG_CC_STACKPROTECTOR" out/.config || true
+          make O=out ARCH=arm64 CC=clang CLANG_TRIPLE=aarch64-linux-gnu- CROSS_COMPILE=aarch64-linux-gnu- KCFLAGS="-Wno-error -Wno-error=strict-prototypes" -j4 2>&1 | tee build.log | tail -100
+          echo "=== boot output ==="
+          ls -la out/arch/arm64/boot/ || true
+          test -f out/arch/arm64/boot/Image.gz-dtb && echo "Image.gz-dtb EXISTS" || { echo "KERNEL MISSING - BUILD FAILED"; exit 1; }
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-suki-build-log
+          path: kernel/build.log
+          if-no-files-found: ignore
+
+      - name: Upload kernel image
+        uses: actions/upload-artifact@v4
+        with:
+          name: chopin-suki-kernel
+          path: |
+            kernel/out/arch/arm64/boot/Image.gz-dtb
+            kernel/out/arch/arm64/boot/Image
+            kernel/out/arch/arm64/boot/dts/mediatek/*.dtb
+            kernel/build.log
+            kernel/out/.config
+          if-no-files-found: warn
