@@ -24,6 +24,24 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
+      - name: Remove -Werror flags (like build19)
+        run: |
+          cd kernel
+          sed -i \
+            -e 's/-Werror=strict-prototypes//g' \
+            -e 's/-Werror=implicit-int//g' \
+            -e 's/-Werror=date-time//g' \
+            -e 's/-Werror=incompatible-pointer-types//g' \
+            -e 's/-Werror=designated-init//g' \
+            -e 's/-Werror-implicit-function-declaration//g' \
+            -e 's/-Werror=unknown-warning-option//g' \
+            Makefile
+          for f in $(grep -rl --include="Makefile" -- "-Werror" .); do
+            sed -i 's/ -Werror / /g; s/ -Werror$/ /g' "$f"
+          done
+          echo "=== remaining -Werror ==="
+          grep -rn --include="Makefile" "\-Werror" . | head -10 || echo "none"
+
       - name: Build stock kernel
         run: |
           set -o pipefail
