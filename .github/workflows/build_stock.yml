@@ -16,12 +16,8 @@ jobs:
 
       - name: Setup clang
         run: |
-          mkdir -p clang
-          cd clang
-          curl -sL "https://github.com/LineageOS/android_prebuilts_clang_host_linux-x86_clang-r416183b/archive/refs/heads/lineage-20.tar.gz" -o clang.tar.gz
-          tar xzf clang.tar.gz
-          mv android_prebuilts_clang_host_linux-x86_clang-r416183b-lineage-20 clang-r416183b
-          ls clang-r416183b/bin/clang
+          git clone --depth 1 -b lineage-20.0 https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git clang
+          ls clang/bin/clang
 
       - name: Build stock kernel
         run: |
